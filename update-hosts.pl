@@ -2,7 +2,8 @@
 ### By Blake Stephens #####################################
 use strict;
 use warnings;
-
+use IO::Socket::INET;
+use Net::Ping;
 
 ## Set the path to your hosts file
 my $hosts_path = '/etc/hosts';
@@ -17,6 +18,7 @@ my $domain = '';
 
 ### CODE ##################################################
 
+my $my_ip_address = '';
 main();
 
 exit;
@@ -26,12 +28,17 @@ exit;
 sub main {
 	my $found = 0;
 
+	# tickle the subnet to wake it up and look up everything on the local network.
+	# tickleSubnet();
+	pingEverybody();
+
 	# do an arp lookup on each MAC address
 	my @Records = `arp -a`;
 
 	# loop through all address keys
 	foreach my $host (sort keys %ADDRESSES) {
 		my $mac = $ADDRESSES{$host};
+		printf("MAC Address to find: %s\n", $mac);
 		foreach my $line (@Records) {
 			# if it's successful,
 			if ($line =~ /\((\d+\.\d+\.\d+\.\d+)\) at $mac on/) {
@@ -54,6 +61,27 @@ sub main {
 	if ($found) {
 		printf("\nUpdated hosts file below:\n%s\n", '-'x30);
 		system('cat', $hosts_path);
+	}
+}
+
+sub tickleSubnet {
+	my $ip = get_local_ip_address();
+	(my $subnet = $ip) =~ s/\d+$/255/;
+
+	system('ping', '-r', '-c', 2, $subnet);
+}
+
+sub pingEverybody {
+	my $ip = get_local_ip_address();
+	(my $base_subnet = $ip) =~ s/\d+$//;
+	for (my $i = 0; $i < 255; $i++) {
+		# print `ping -c 1 $base_subnet$i | grep -B 1 "Lost = 0" &`;
+		# print `ping -c 1 -W 400 $base_subnet$i | grep -B 1 "1 packets received" &`;
+		# print `ping -c 1 -W 4 $base_subnet$i`;
+		my $host = "$base_subnet$i";
+		my $p = Net::Ping->new('icmp');
+		print "\nPinging host $host";
+		$p->ping($host,1);
 	}
 }
 
@@ -89,4 +117,23 @@ sub addToHosts {
 	close($out);
 
 	system('mv', $hosts_path_new, $hosts_path);
+}
+
+# This idea was stolen from Net::Address::IP::Local::connected_to()
+# And stolen again from http://stackoverflow.com/questions/330458/how-can-i-determine-the-local-machines-ip-addresses-from-perl
+# written by tstanton
+sub get_local_ip_address {
+	return $my_ip_address if ($my_ip_address);
+
+	my $socket = IO::Socket::INET->new(
+		Proto       => 'udp',
+		PeerAddr    => '8.8.4.4', # Google's public DNS
+		PeerPort    => '53', # DNS
+	);
+
+	# A side-effect of making a socket connection is that our IP address
+	# is available from the 'sockhost' method
+	$my_ip_address = $socket->sockhost;
+
+	return $my_ip_address;
 }
